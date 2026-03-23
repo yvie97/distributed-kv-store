@@ -57,8 +57,28 @@ distkv-client -consistency=one get "cache-key"
 
 **Response:**
 - `found` (bool): Whether key exists
-- `value` (string): The stored value
+- `value` (string): The stored value (primary or first sibling)
 - `vector_clock` (object): Version information
+- `has_conflict` (bool): True when concurrent versions exist (Dynamo-style siblings)
+- `siblings` (array of SiblingVersion): All concurrent versions when `has_conflict` is true
+
+**SiblingVersion:**
+- `value` (bytes): The value of this version
+- `vector_clock` (object): Vector clock for this version
+
+**Conflict Handling:**
+
+When multiple nodes accept concurrent writes to the same key (no causal ordering between their vector clocks), the GET response preserves all versions as siblings instead of silently picking one. The client is responsible for resolving the conflict and writing back the merged value.
+
+```bash
+# Example: conflict detected
+$ distkv-client get "user:123"
+Key: user:123
+CONFLICT: 2 concurrent versions detected!
+  Version 1: Alice (vector clock: map[node1:1])
+  Version 2: Bob (vector clock: map[node2:1])
+Please resolve the conflict by writing the correct value with PUT.
+```
 
 #### DELETE - Remove Key
 

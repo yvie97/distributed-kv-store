@@ -10,7 +10,7 @@ DistKV is a highly available, scalable distributed key-value store inspired by A
 - **Persistent Storage**: LSM-tree storage engine with MemTables, SSTables, and compaction
 - **Gossip Protocol**: Complete network-based gossip implementation for cluster coordination and failure detection
 - **Consistent Hashing**: Virtual node-based partitioning with minimal data movement when scaling
-- **Vector Clocks**: Conflict detection and causality tracking for concurrent updates
+- **Vector Clocks**: Conflict detection and causality tracking with Dynamo-style sibling preservation
 - **TLS Security**: Production-ready TLS 1.2+ encryption for all client-server and inter-node communication
 
 ## 📋 System Requirements
@@ -153,7 +153,7 @@ scripts\stop-cluster.bat
   - **Memory management**: Configurable limits (2GB default) with pressure monitoring and automatic GC tuning
 - **Partitioning**: Consistent hashing with configurable virtual nodes
 - **Replication**: Configurable quorum-based consensus (default: N=3, R=2, W=2)
-- **Conflict Resolution**: Vector clocks for causality tracking
+- **Conflict Resolution**: Vector clocks with Dynamo-style sibling preservation for concurrent updates
 - **Failure Detection**: Network-based gossip protocol with heartbeat monitoring
 - **Communication**: gRPC with optimized connection pooling
   - Connection pool with health monitoring and automatic reconnection
@@ -290,6 +290,25 @@ time ./build/distkv-client get key500
 # Guarantees: Strongest consistency, lower availability
 ./build/distkv-client -consistency=all put key value
 ```
+
+### Conflict Resolution (Dynamo-Style Siblings)
+
+When concurrent writes occur on different nodes with no causal ordering (detected via vector clocks), DistKV preserves **all concurrent versions as siblings** rather than silently discarding any. This follows Amazon Dynamo's approach of letting the application decide how to merge conflicts.
+
+```bash
+# If a conflict is detected during a GET:
+$ ./build/distkv-client get user:123
+Key: user:123
+CONFLICT: 2 concurrent versions detected!
+  Version 1: Alice (vector clock: map[node1:1])
+  Version 2: Bob (vector clock: map[node2:1])
+Please resolve the conflict by writing the correct value with PUT.
+
+# Resolve by writing back the merged value:
+$ ./build/distkv-client put user:123 "Alice and Bob"
+```
+
+When versions are causally ordered (one vector clock strictly dominates another), the system automatically resolves to the latest version with no conflict reported.
 
 ## 📊 Monitoring & Observability
 

@@ -102,6 +102,13 @@ type ReadRequest struct {
 	Context context.Context // Request context for timeouts
 }
 
+// Sibling represents one concurrent version of a value.
+type Sibling struct {
+	Value       []byte
+	VectorClock *consensus.VectorClock
+	NodeID      string
+}
+
 // ReadResponse represents the response from a read operation.
 type ReadResponse struct {
 	Value        []byte                 // The value (nil if not found)
@@ -109,6 +116,8 @@ type ReadResponse struct {
 	Found        bool                   // Whether the key was found
 	ReplicasRead int                    // Number of replicas that responded
 	Errors       []error                // Any errors that occurred
+	Siblings     []Sibling              // All concurrent versions (len > 1 means conflict)
+	HasConflict  bool                   // True when multiple concurrent versions exist
 }
 
 // ReplicaResponse represents a response from a single replica.
@@ -439,8 +448,9 @@ func (qm *QuorumManager) Read(req *ReadRequest) (*ReadResponse, error) {
 	return qm.resolveReadConflicts(responses, errs), nil
 }
 
-// resolveReadConflicts finds the most recent version among conflicting replicas.
-// Uses vector clocks to determine causality and resolve conflicts.
+// resolveReadConflicts resolves conflicts among replica responses using vector clocks.
+// When concurrent versions are detected (no causal ordering), all versions are preserved
+// as siblings (Dynamo-style) and returned to the client for application-level resolution.
 func (qm *QuorumManager) resolveReadConflicts(responses []*ReplicaResponse, errors []error) *ReadResponse {
 	if len(responses) == 0 {
 		return &ReadResponse{
@@ -450,38 +460,70 @@ func (qm *QuorumManager) resolveReadConflicts(responses []*ReplicaResponse, erro
 		}
 	}
 
-	// Find the response with the most recent vector clock
-	var latestResponse *ReplicaResponse
+	// Build list of winning versions by filtering out causally dominated ones.
+	// Start with all responses as candidates, then remove any that are strictly
+	// preceded by another.
+	type candidate struct {
+		resp *ReplicaResponse
+	}
+	candidates := make([]candidate, 0, len(responses))
 
 	for _, response := range responses {
-		if latestResponse == nil {
-			latestResponse = response
-			continue
+		dominated := false
+		newCandidates := candidates[:0]
+
+		for _, c := range candidates {
+			// Check if existing candidate dominates the new response
+			if c.resp.VectorClock != nil && response.VectorClock != nil {
+				if c.resp.VectorClock.IsAfter(response.VectorClock) {
+					dominated = true
+					newCandidates = append(newCandidates, c)
+					continue
+				}
+				if response.VectorClock.IsAfter(c.resp.VectorClock) {
+					// New response dominates existing candidate — drop the candidate
+					continue
+				}
+			} else if response.VectorClock != nil && c.resp.VectorClock == nil {
+				// New response has a clock, old doesn't — new dominates
+				continue
+			} else if response.VectorClock == nil && c.resp.VectorClock != nil {
+				// Old has a clock, new doesn't — old dominates
+				dominated = true
+				newCandidates = append(newCandidates, c)
+				continue
+			}
+			// Concurrent or both nil — keep both
+			newCandidates = append(newCandidates, c)
 		}
 
-		// Compare vector clocks to find the most recent version
-		if response.VectorClock != nil && latestResponse.VectorClock != nil {
-			if response.VectorClock.IsAfter(latestResponse.VectorClock) {
-				latestResponse = response
-			} else if response.VectorClock.IsConcurrent(latestResponse.VectorClock) {
-				// Concurrent updates - this is a conflict that needs resolution
-				// For now, we'll use a simple tie-breaker (node ID)
-				// In production, this might trigger read repair
-				if response.NodeID > latestResponse.NodeID {
-					latestResponse = response
-				}
-			}
-		} else if response.VectorClock != nil && latestResponse.VectorClock == nil {
-			latestResponse = response
+		candidates = newCandidates
+		if !dominated {
+			candidates = append(candidates, candidate{resp: response})
 		}
 	}
 
+	// Build siblings from surviving candidates
+	siblings := make([]Sibling, 0, len(candidates))
+	for _, c := range candidates {
+		siblings = append(siblings, Sibling{
+			Value:       c.resp.Value,
+			VectorClock: c.resp.VectorClock,
+			NodeID:      c.resp.NodeID,
+		})
+	}
+
+	hasConflict := len(siblings) > 1
+	first := candidates[0].resp
+
 	return &ReadResponse{
-		Value:        latestResponse.Value,
-		VectorClock:  latestResponse.VectorClock,
-		Found:        latestResponse.Value != nil,
+		Value:        first.Value,
+		VectorClock:  first.VectorClock,
+		Found:        first.Value != nil,
 		ReplicasRead: len(responses),
 		Errors:       errors,
+		Siblings:     siblings,
+		HasConflict:  hasConflict,
 	}
 }
 

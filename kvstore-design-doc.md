@@ -96,20 +96,35 @@ class ConsistentHash:
 - **R** = Read quorum
 - Guarantees strong consistency when W + R > N
 
-### 2.3 Conflict Resolution - Vector Clocks
+### 2.3 Conflict Resolution - Vector Clocks & Dynamo-Style Siblings
 
-Implemented vector clocks for detecting concurrent updates:
+Implemented vector clocks for detecting concurrent updates. When quorum reads detect truly concurrent versions (neither vector clock dominates the other), all versions are preserved as **siblings** and returned to the client for application-level resolution — following Amazon Dynamo's approach.
+
+**Causal ordering** (one VC strictly after another): the system automatically picks the latest version. No conflict is reported.
+
+**Concurrent versions** (neither VC dominates): all versions are returned as siblings in the `GetResponse`, with `has_conflict = true`. The application must merge and write back the resolved value.
 
 ```python
 class VectorClock:
     def __init__(self):
         self.clock = {}
-    
+
     def increment(self, node_id):
         self.clock[node_id] = self.clock.get(node_id, 0) + 1
-    
+
     def is_concurrent(self, other):
         return not (self <= other or other <= self)
+```
+
+```protobuf
+message GetResponse {
+  bytes value = 1;                          // Primary value (first sibling)
+  bool found = 2;
+  VectorClock vector_clock = 3;
+  string error_message = 4;
+  repeated SiblingVersion siblings = 5;     // All concurrent versions
+  bool has_conflict = 6;                    // True when siblings > 1
+}
 ```
 
 ---

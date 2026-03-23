@@ -61,10 +61,17 @@ message GetRequest {
 }
 
 message GetResponse {
-  bytes value = 1;
+  bytes value = 1;                          // Primary value (latest or first sibling)
   bool found = 2;
   VectorClock vector_clock = 3;
   string error_message = 4;
+  repeated SiblingVersion siblings = 5;     // All concurrent versions (empty if no conflict)
+  bool has_conflict = 6;                    // True when siblings > 1
+}
+
+message SiblingVersion {
+  bytes value = 1;
+  VectorClock vector_clock = 2;
 }
 
 message DeleteRequest {

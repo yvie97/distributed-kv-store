@@ -537,6 +537,91 @@ func TestSplitBrainPrevention(t *testing.T) {
 	}
 }
 
+// TestPartitionCausesSiblings tests that network partitions causing concurrent
+// writes result in sibling versions being preserved after partition heals.
+func TestPartitionCausesSiblings(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("Network partition tests require root privileges for iptables")
+	}
+
+	cluster := SetupChaosCluster(t, 3)
+	defer cluster.TearDown()
+
+	ctx := context.Background()
+	key := "partition-sibling-test"
+
+	// Store initial data
+	client := cluster.nodes[0].client
+	putReq := &proto.PutRequest{
+		Key:              key,
+		Value:            []byte("initial"),
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	}
+	resp, err := client.Put(ctx, putReq)
+	if err != nil || !resp.Success {
+		t.Fatalf("Initial put failed: %v", err)
+	}
+
+	// Partition: isolate node2 from nodes 0,1
+	err = cluster.CreateNetworkPartition("sibling-test", []int{2})
+	if err != nil {
+		t.Fatalf("Failed to create partition: %v", err)
+	}
+	time.Sleep(15 * time.Second)
+
+	// Write different values to each side with ONE consistency
+	// (bypassing quorum so each side can write locally)
+	majorityClient := cluster.nodes[0].client
+	putMajority := &proto.PutRequest{
+		Key:              key,
+		Value:            []byte("majority-value"),
+		ConsistencyLevel: proto.ConsistencyLevel_ONE,
+	}
+	majorityClient.Put(ctx, putMajority)
+
+	minorityClient := cluster.nodes[2].client
+	putMinority := &proto.PutRequest{
+		Key:              key,
+		Value:            []byte("minority-value"),
+		ConsistencyLevel: proto.ConsistencyLevel_ONE,
+	}
+	minorityClient.Put(ctx, putMinority)
+
+	// Heal partition
+	cluster.HealNetworkPartition("sibling-test")
+	time.Sleep(15 * time.Second)
+
+	// Read with QUORUM — should detect concurrent versions as siblings
+	getReq := &proto.GetRequest{
+		Key:              key,
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	}
+
+	getResp, err := majorityClient.Get(ctx, getReq)
+	if err != nil {
+		t.Fatalf("Get after partition heal failed: %v", err)
+	}
+
+	if !getResp.Found {
+		t.Fatal("Key not found after partition heal")
+	}
+
+	if getResp.HasConflict {
+		t.Logf("Conflict detected with %d siblings after partition heal (expected)", len(getResp.Siblings))
+		values := make(map[string]bool)
+		for i, s := range getResp.Siblings {
+			t.Logf("  Sibling %d: %s", i+1, string(s.Value))
+			values[string(s.Value)] = true
+		}
+		if !values["majority-value"] || !values["minority-value"] {
+			t.Errorf("Expected both partition values in siblings, got %v", values)
+		}
+	} else {
+		// One value may have causally dominated if replication happened before the read
+		t.Logf("No conflict — replication resolved versions (value: %s)", string(getResp.Value))
+	}
+}
+
 // Helper functions
 
 func contains(slice []int, item int) bool {

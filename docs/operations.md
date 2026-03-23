@@ -128,11 +128,68 @@ fi
 - Request error rate > 5%
 - Disk usage > 85%
 
-#### Warning Alerts  
+#### Warning Alerts
 - Node suspected (missed heartbeats)
 - Request latency p99 > 50ms
 - Compaction behind by > 2 hours
 - Memory usage > 80%
+- Sibling conflict rate > 1% of reads (see Conflict Monitoring below)
+
+## Conflict Monitoring
+
+### Understanding Siblings
+
+DistKV uses Dynamo-style sibling preservation for concurrent writes. When two nodes accept writes to the same key without coordinating (e.g., during a network partition or with `ONE` consistency), the system preserves **all concurrent versions as siblings** rather than silently discarding any. The client is responsible for resolving conflicts.
+
+### Detecting Conflicts
+
+When a `GET` response has `has_conflict = true`, the `siblings` field contains all concurrent versions. Monitor the rate of conflicted reads:
+
+```bash
+# Check logs for conflict events
+grep "CONFLICT" /var/log/distkv/distkv.log | wc -l
+
+# Monitor conflict rate via metrics
+# The replication metrics track conflict resolution stats
+./distkv-client status | grep -i conflict
+```
+
+### Common Causes of Siblings
+
+| Cause | Solution |
+|-------|----------|
+| Network partition healed with divergent writes | Application-level merge on read |
+| High write concurrency with `ONE` consistency | Use `QUORUM` consistency for writes |
+| Clock skew between nodes | Ensure NTP synchronization |
+| Node rejoining after prolonged downtime | Wait for anti-entropy repair to complete |
+
+### Resolving Siblings
+
+When the client detects siblings, it should:
+
+1. Read all sibling values and their vector clocks
+2. Apply application-specific merge logic (e.g., last-writer-wins, union, custom merge)
+3. Write back the resolved value with a `PUT`, which creates a new vector clock that supersedes all siblings
+
+```bash
+# Example: client detects conflict
+$ ./distkv-client get user:123
+Key: user:123
+CONFLICT: 2 concurrent versions detected!
+  Version 1: Alice (vector clock: map[node1:1])
+  Version 2: Bob (vector clock: map[node2:1])
+Please resolve the conflict by writing the correct value with PUT.
+
+# Resolve by writing the merged value
+$ ./distkv-client put user:123 "Alice and Bob"
+```
+
+### Reducing Conflict Frequency
+
+- **Use `QUORUM` or `ALL` consistency** for writes to ensure coordination
+- **Minimize partition duration** — monitor and alert on network issues
+- **Avoid writing the same key from multiple nodes simultaneously** when possible
+- **Keep NTP synchronized** to reduce the window for concurrent operations
 
 ## Backup and Recovery
 

@@ -236,6 +236,16 @@ func (c *DistKVClient) Get(key string) error {
 
 	if !resp.Found {
 		fmt.Printf("Key '%s' not found\n", key)
+	} else if resp.HasConflict {
+		fmt.Printf("Key: %s\nCONFLICT: %d concurrent versions detected!\n", key, len(resp.Siblings))
+		for i, sibling := range resp.Siblings {
+			fmt.Printf("  Version %d: %s", i+1, string(sibling.Value))
+			if sibling.VectorClock != nil {
+				fmt.Printf(" (vector clock: %v)", sibling.VectorClock.Clocks)
+			}
+			fmt.Println()
+		}
+		fmt.Println("Please resolve the conflict by writing the correct value with PUT.")
 	} else {
 		fmt.Printf("Key: %s\nValue: %s\n", key, string(resp.Value))
 	}

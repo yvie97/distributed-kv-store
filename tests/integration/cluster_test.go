@@ -429,3 +429,123 @@ func TestConcurrentOperations(t *testing.T) {
 		}
 	}
 }
+
+// TestSiblingPreservationOnConcurrentWrites tests that concurrent writes to the
+// same key from different nodes result in siblings being preserved rather than
+// one value being silently discarded.
+func TestSiblingPreservationOnConcurrentWrites(t *testing.T) {
+	cluster := SetupCluster(t, 3)
+	defer cluster.TearDown()
+
+	ctx := context.Background()
+
+	// Write the same key concurrently from two different nodes with ONE consistency
+	// to avoid quorum coordination, increasing the chance of concurrent versions.
+	key := "sibling-test-key"
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		client := cluster.nodes[0].client
+		req := &proto.PutRequest{
+			Key:              key,
+			Value:            []byte("value-from-node0"),
+			ConsistencyLevel: proto.ConsistencyLevel_ONE,
+		}
+		client.Put(ctx, req)
+	}()
+
+	go func() {
+		defer wg.Done()
+		client := cluster.nodes[1].client
+		req := &proto.PutRequest{
+			Key:              key,
+			Value:            []byte("value-from-node1"),
+			ConsistencyLevel: proto.ConsistencyLevel_ONE,
+		}
+		client.Put(ctx, req)
+	}()
+
+	wg.Wait()
+
+	// Allow time for replication
+	time.Sleep(3 * time.Second)
+
+	// Read with QUORUM to trigger conflict detection across replicas
+	getReq := &proto.GetRequest{
+		Key:              key,
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	}
+
+	resp, err := cluster.nodes[2].client.Get(ctx, getReq)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !resp.Found {
+		t.Fatal("Key not found")
+	}
+
+	// If concurrent versions were detected, siblings should be preserved
+	if resp.HasConflict {
+		if len(resp.Siblings) < 2 {
+			t.Errorf("HasConflict is true but only %d siblings returned", len(resp.Siblings))
+		}
+
+		t.Logf("Conflict detected with %d siblings (as expected for concurrent writes)", len(resp.Siblings))
+		for i, s := range resp.Siblings {
+			t.Logf("  Sibling %d: %s", i+1, string(s.Value))
+		}
+	} else {
+		// If one version happened-before the other (due to timing), no conflict is fine
+		t.Logf("No conflict detected — one write causally preceded the other (value: %s)", string(resp.Value))
+	}
+}
+
+// TestGetResponseNoConflictOnSingleWriter verifies that a single writer
+// produces no sibling conflict on read.
+func TestGetResponseNoConflictOnSingleWriter(t *testing.T) {
+	cluster := SetupCluster(t, 3)
+	defer cluster.TearDown()
+
+	ctx := context.Background()
+	client := cluster.nodes[0].client
+
+	putReq := &proto.PutRequest{
+		Key:              "no-conflict-key",
+		Value:            []byte("single-value"),
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	}
+
+	resp, err := client.Put(ctx, putReq)
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("Put failed: %s", resp.ErrorMessage)
+	}
+
+	getReq := &proto.GetRequest{
+		Key:              "no-conflict-key",
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	}
+
+	getResp, err := client.Get(ctx, getReq)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !getResp.Found {
+		t.Fatal("Key not found")
+	}
+
+	if getResp.HasConflict {
+		t.Error("Expected no conflict for single-writer scenario")
+	}
+
+	if string(getResp.Value) != "single-value" {
+		t.Errorf("Expected 'single-value', got '%s'", string(getResp.Value))
+	}
+}

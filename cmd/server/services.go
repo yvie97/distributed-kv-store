@@ -73,11 +73,22 @@ func (s *DistKVServiceImpl) Get(ctx context.Context, req *proto.GetRequest) (*pr
 		}, nil
 	}
 
+	// Convert siblings to proto format
+	var protoSiblings []*proto.SiblingVersion
+	for _, s := range readResp.Siblings {
+		protoSiblings = append(protoSiblings, &proto.SiblingVersion{
+			Value:       s.Value,
+			VectorClock: convertVectorClockToProto(s.VectorClock),
+		})
+	}
+
 	return &proto.GetResponse{
 		Value:        readResp.Value,
 		Found:        readResp.Found,
 		VectorClock:  convertVectorClockToProto(readResp.VectorClock),
 		ErrorMessage: "",
+		Siblings:     protoSiblings,
+		HasConflict:  readResp.HasConflict,
 	}, nil
 }
 

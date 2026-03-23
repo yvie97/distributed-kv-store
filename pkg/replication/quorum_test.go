@@ -466,9 +466,18 @@ func TestReadConflictResolution(t *testing.T) {
 		t.Fatalf("Read failed: %v", err)
 	}
 
-	// Should return the newer value
+	// Should return the newer value (causal ordering resolved)
 	if string(resp.Value) != "new-value" {
 		t.Errorf("Expected 'new-value', got '%s'", string(resp.Value))
+	}
+
+	// No conflict since one VC is strictly after the other
+	if resp.HasConflict {
+		t.Error("Expected no conflict for causally ordered versions")
+	}
+
+	if len(resp.Siblings) != 1 {
+		t.Errorf("Expected 1 sibling, got %d", len(resp.Siblings))
 	}
 }
 
@@ -580,5 +589,121 @@ func TestLocalWriteRead(t *testing.T) {
 
 	if string(readResp.Value) != "test-value" {
 		t.Errorf("Expected 'test-value', got '%s'", string(readResp.Value))
+	}
+}
+
+// TestReadConcurrentVersionsPreserved tests that truly concurrent versions are preserved as siblings
+func TestReadConcurrentVersionsPreserved(t *testing.T) {
+	config := &QuorumConfig{N: 3, R: 2, W: 2, RequestTimeout: 5 * time.Second,
+		RetryAttempts: 3, RetryDelay: 100 * time.Millisecond}
+
+	replicas := []ReplicaInfo{
+		{NodeID: "node1", Address: "addr1", IsAlive: true},
+		{NodeID: "node2", Address: "addr2", IsAlive: true},
+		{NodeID: "node3", Address: "addr3", IsAlive: true},
+	}
+
+	selector := &MockNodeSelector{aliveReplicas: replicas, replicas: replicas}
+
+	// Create two truly concurrent vector clocks (neither is after the other)
+	vc1 := consensus.NewVectorClock()
+	vc1.Increment("node1") // {node1: 1}
+
+	vc2 := consensus.NewVectorClock()
+	vc2.Increment("node2") // {node2: 1}
+
+	client := &MockReplicaClient{
+		writeResponses: make(map[string]*ReplicaResponse),
+		readResponses: map[string]*ReplicaResponse{
+			"node1": {NodeID: "node1", Success: true, Value: []byte("value-A"), VectorClock: vc1},
+			"node2": {NodeID: "node2", Success: true, Value: []byte("value-B"), VectorClock: vc2},
+		},
+	}
+	storageEngine := NewMockStorageEngine()
+
+	qm, _ := NewQuorumManager(config, selector, client, storageEngine)
+
+	req := &ReadRequest{
+		Key:     "test-key",
+		Context: context.Background(),
+	}
+
+	resp, err := qm.Read(req)
+
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if !resp.HasConflict {
+		t.Error("Expected conflict for concurrent versions")
+	}
+
+	if len(resp.Siblings) != 2 {
+		t.Fatalf("Expected 2 siblings, got %d", len(resp.Siblings))
+	}
+
+	// Both values should be present in siblings
+	values := map[string]bool{}
+	for _, s := range resp.Siblings {
+		values[string(s.Value)] = true
+	}
+
+	if !values["value-A"] || !values["value-B"] {
+		t.Errorf("Expected both value-A and value-B in siblings, got %v", values)
+	}
+}
+
+// TestReadCausalOrderResolved tests that causally ordered versions resolve to a single value
+func TestReadCausalOrderResolved(t *testing.T) {
+	config := &QuorumConfig{N: 3, R: 2, W: 2, RequestTimeout: 5 * time.Second,
+		RetryAttempts: 3, RetryDelay: 100 * time.Millisecond}
+
+	replicas := []ReplicaInfo{
+		{NodeID: "node1", Address: "addr1", IsAlive: true},
+		{NodeID: "node2", Address: "addr2", IsAlive: true},
+		{NodeID: "node3", Address: "addr3", IsAlive: true},
+	}
+
+	selector := &MockNodeSelector{aliveReplicas: replicas, replicas: replicas}
+
+	// Create causally ordered vector clocks
+	oldVC := consensus.NewVectorClock()
+	oldVC.Increment("node1") // {node1: 1}
+
+	newVC := oldVC.Copy()
+	newVC.Increment("node2") // {node1: 1, node2: 1} — strictly after oldVC
+
+	client := &MockReplicaClient{
+		writeResponses: make(map[string]*ReplicaResponse),
+		readResponses: map[string]*ReplicaResponse{
+			"node1": {NodeID: "node1", Success: true, Value: []byte("old-value"), VectorClock: oldVC},
+			"node2": {NodeID: "node2", Success: true, Value: []byte("new-value"), VectorClock: newVC},
+		},
+	}
+	storageEngine := NewMockStorageEngine()
+
+	qm, _ := NewQuorumManager(config, selector, client, storageEngine)
+
+	req := &ReadRequest{
+		Key:     "test-key",
+		Context: context.Background(),
+	}
+
+	resp, err := qm.Read(req)
+
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if resp.HasConflict {
+		t.Error("Expected no conflict for causally ordered versions")
+	}
+
+	if len(resp.Siblings) != 1 {
+		t.Errorf("Expected 1 sibling, got %d", len(resp.Siblings))
+	}
+
+	if string(resp.Value) != "new-value" {
+		t.Errorf("Expected 'new-value', got '%s'", string(resp.Value))
 	}
 }
