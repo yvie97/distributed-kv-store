@@ -5,6 +5,7 @@ import (
 	"distkv/pkg/consensus"
 	"distkv/pkg/storage"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,16 +32,22 @@ func (m *MockNodeSelector) GetAliveReplicas(key string, count int) []ReplicaInfo
 
 // MockReplicaClient implements ReplicaClient for testing
 type MockReplicaClient struct {
-	writeResponses map[string]*ReplicaResponse
-	readResponses  map[string]*ReplicaResponse
-	writeDelay     time.Duration
-	readDelay      time.Duration
+	writeResponses  map[string]*ReplicaResponse
+	readResponses   map[string]*ReplicaResponse
+	writeDelay      time.Duration
+	readDelay       time.Duration
+	repairCallsMu   sync.Mutex
+	repairCallNodes []string // nodeIDs that received a WriteReplica call (for read repair verification)
 }
 
 func (m *MockReplicaClient) WriteReplica(ctx context.Context, nodeID string, key string, value []byte, vectorClock *consensus.VectorClock) (*ReplicaResponse, error) {
 	if m.writeDelay > 0 {
 		time.Sleep(m.writeDelay)
 	}
+
+	m.repairCallsMu.Lock()
+	m.repairCallNodes = append(m.repairCallNodes, nodeID)
+	m.repairCallsMu.Unlock()
 
 	if resp, exists := m.writeResponses[nodeID]; exists {
 		return resp, resp.Error
@@ -705,5 +712,56 @@ func TestReadCausalOrderResolved(t *testing.T) {
 
 	if string(resp.Value) != "new-value" {
 		t.Errorf("Expected 'new-value', got '%s'", string(resp.Value))
+	}
+}
+
+// TestReadRepairTriggeredForStaleReplica verifies that when a quorum read finds
+// one replica with a causally older version, the coordinator asynchronously
+// pushes the winning version back to that stale replica (read repair).
+func TestReadRepairTriggeredForStaleReplica(t *testing.T) {
+	oldVC := consensus.NewVectorClock()
+	oldVC.Increment("node1")
+
+	newVC := consensus.NewVectorClock()
+	newVC.Increment("node1")
+	newVC.Increment("node2")
+
+	mockClient := &MockReplicaClient{
+		readResponses: map[string]*ReplicaResponse{
+			"node1": {NodeID: "node1", Success: true, Value: []byte("old-value"), VectorClock: oldVC},
+			"node2": {NodeID: "node2", Success: true, Value: []byte("new-value"), VectorClock: newVC},
+		},
+	}
+
+	qm, _ := NewQuorumManager(
+		&QuorumConfig{N: 2, R: 2, W: 2, RequestTimeout: 5 * time.Second},
+		&MockNodeSelector{aliveReplicas: []ReplicaInfo{
+			{NodeID: "node1", IsAlive: true},
+			{NodeID: "node2", IsAlive: true},
+		}},
+		mockClient,
+		NewMockStorageEngine(),
+	)
+
+	resp, err := qm.Read(&ReadRequest{Key: "repair-key", Context: context.Background()})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if string(resp.Value) != "new-value" {
+		t.Errorf("Expected 'new-value', got '%s'", string(resp.Value))
+	}
+	if resp.HasConflict {
+		t.Error("Expected no conflict — versions are causally ordered")
+	}
+
+	// Read repair is async; give it a moment to complete
+	time.Sleep(100 * time.Millisecond)
+
+	mockClient.repairCallsMu.Lock()
+	repaired := mockClient.repairCallNodes
+	mockClient.repairCallsMu.Unlock()
+
+	if len(repaired) != 1 || repaired[0] != "node1" {
+		t.Errorf("Expected read repair write to node1, got: %v", repaired)
 	}
 }

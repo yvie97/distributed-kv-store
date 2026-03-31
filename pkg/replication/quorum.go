@@ -445,7 +445,15 @@ func (qm *QuorumManager) Read(req *ReadRequest) (*ReadResponse, error) {
 	}).Debug("Quorum read succeeded")
 
 	// Resolve conflicts and find the most recent version
-	return qm.resolveReadConflicts(responses, errs), nil
+	result := qm.resolveReadConflicts(responses, errs)
+
+	// Trigger async read repair for any stale replicas when there's a clear winner.
+	// If versions are concurrent (siblings), there's no single correct value to push.
+	if !result.HasConflict && result.Found && result.VectorClock != nil {
+		go qm.repairStaleReplicas(req.Key, result.Value, result.VectorClock, responses)
+	}
+
+	return result, nil
 }
 
 // resolveReadConflicts resolves conflicts among replica responses using vector clocks.
@@ -524,6 +532,30 @@ func (qm *QuorumManager) resolveReadConflicts(responses []*ReplicaResponse, erro
 		Errors:       errors,
 		Siblings:     siblings,
 		HasConflict:  hasConflict,
+	}
+}
+
+// repairStaleReplicas asynchronously pushes the winning version to any replicas
+// that returned a causally older version during a quorum read (read repair).
+func (qm *QuorumManager) repairStaleReplicas(key string, winningValue []byte, winningVC *consensus.VectorClock, responses []*ReplicaResponse) {
+	ctx, cancel := context.WithTimeout(context.Background(), qm.config.RequestTimeout)
+	defer cancel()
+
+	for _, resp := range responses {
+		if resp.VectorClock == nil || !winningVC.IsAfter(resp.VectorClock) {
+			continue // Already up to date or ordering is indeterminate
+		}
+		qm.logger.WithFields(map[string]interface{}{
+			"key":    key,
+			"nodeID": resp.NodeID,
+		}).Debug("Read repair: pushing newer version to stale replica")
+
+		if _, err := qm.client.WriteReplica(ctx, resp.NodeID, key, winningValue, winningVC); err != nil {
+			qm.logger.WithFields(map[string]interface{}{
+				"key":    key,
+				"nodeID": resp.NodeID,
+			}).WithError(err).Warn("Read repair write failed")
+		}
 	}
 }
 
