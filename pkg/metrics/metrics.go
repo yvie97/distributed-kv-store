@@ -15,8 +15,7 @@ type MetricsCollector struct {
 	gossip      *GossipMetrics
 	network     *NetworkMetrics
 	system      *SystemMetrics
-	mutex       sync.RWMutex
-	startTime   time.Time
+	startTime time.Time
 }
 
 // StorageMetrics tracks storage engine performance

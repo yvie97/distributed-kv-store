@@ -124,8 +124,12 @@ func CreateSSTable(memTable *MemTable, filePath string, config *StorageConfig) (
 		binary.LittleEndian.PutUint32(sizeBytes, uint32(len(entryData)))
 
 		// Write to file and update checksum
-		writer.Write(sizeBytes)
-		writer.Write(entryData)
+		if _, err := writer.Write(sizeBytes); err != nil {
+			return nil, fmt.Errorf("failed to write entry size: %w", err)
+		}
+		if _, err := writer.Write(entryData); err != nil {
+			return nil, fmt.Errorf("failed to write entry data: %w", err)
+		}
 		checksum.Write(sizeBytes)
 		checksum.Write(entryData)
 

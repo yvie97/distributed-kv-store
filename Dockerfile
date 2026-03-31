@@ -6,10 +6,10 @@
 # Multi-stage build for optimal image size
 
 # Build stage
-FROM golang:1.19-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git make protobuf protobuf-dev
+RUN apk add --no-cache git
 
 # Set working directory
 WORKDIR /app
@@ -20,18 +20,8 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy source code
+# Copy source code (includes pre-generated proto files)
 COPY . .
-
-# Install protoc-gen-go and protoc-gen-go-grpc
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-# Generate protobuf files
-RUN protoc --proto_path=proto \
-    --go_out=proto --go_opt=paths=source_relative \
-    --go-grpc_out=proto --go-grpc_opt=paths=source_relative \
-    proto/*.proto
 
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o distkv-server ./cmd/server

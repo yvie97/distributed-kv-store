@@ -180,9 +180,14 @@ jobs:
         chmod +x scripts/generate-proto.sh
         ./scripts/generate-proto.sh
 
+    - name: Build server binary
+      run: |
+        mkdir -p build
+        go build -o build/distkv-server ./cmd/server
+
     - name: Run integration tests
       run: |
-        go test -v -tags=integration ./tests/integration/...
+        go test -v -timeout=120s ./tests/integration/...
 
   security-scan:
     name: Security Scan

@@ -410,7 +410,10 @@ func (e *Engine) Close() error {
 
 		// Perform final flush
 		sstablesDir := filepath.Join(e.dataDir, "sstables")
-		os.MkdirAll(sstablesDir, 0755)
+		if err := os.MkdirAll(sstablesDir, 0755); err != nil {
+			e.logger.WithError(err).Error("Failed to create sstables directory during shutdown")
+			shutdownErrors = append(shutdownErrors, err)
+		}
 		timestamp := time.Now().UnixNano()
 		fileName := fmt.Sprintf("sstable_final_%d.db", timestamp)
 		filePath := filepath.Join(sstablesDir, fileName)
@@ -828,6 +831,10 @@ func (e *Engine) compactSSTablesForLevel(tables []*SSTable, targetLevel int) ([]
 
 	for mergeIterator.Valid() {
 		entry := mergeIterator.Value()
+		if entry == nil {
+			mergeIterator.Next()
+			continue
+		}
 
 		// Skip expired tombstones
 		if entry.Deleted && entry.IsExpired(e.config.TombstoneTTL) {
