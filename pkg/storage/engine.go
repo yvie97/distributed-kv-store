@@ -569,6 +569,9 @@ func (e *Engine) performFlush() {
 			break
 		}
 	}
+
+	level0Count := len(e.sstables[0])
+	needsCompaction := level0Count >= e.config.CompactionThreshold
 	e.mutex.Unlock()
 
 	// Update metrics
@@ -576,13 +579,13 @@ func (e *Engine) performFlush() {
 	e.metrics.Storage().FlushDurationNs.Store(tracker.Finish())
 	e.logger.WithFields(map[string]interface{}{
 		"path":               filePath,
-		"level0SSTableCount": len(e.sstables[0]),
+		"level0SSTableCount": level0Count,
 		"totalSSTableCount":  totalSSTables,
 	}).Info("SSTable created successfully")
 
 	// Check if compaction is needed (for level 0)
-	if len(e.sstables[0]) >= e.config.CompactionThreshold {
-		e.logger.WithField("level0SSTableCount", len(e.sstables[0])).
+	if needsCompaction {
+		e.logger.WithField("level0SSTableCount", level0Count).
 			Info("Level 0 SSTable count exceeded threshold, triggering compaction")
 		e.triggerCompaction()
 	}
