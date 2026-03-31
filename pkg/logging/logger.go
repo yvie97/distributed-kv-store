@@ -72,23 +72,26 @@ func DefaultLogConfig() *LogConfig {
 
 var (
 	globalLogger *Logger
-	once         sync.Once
+	globalMu     sync.Mutex
 )
 
-// InitGlobalLogger initializes the global logger
+// InitGlobalLogger initializes the global logger.
+// Calling this multiple times replaces the global logger, allowing reconfiguration.
 func InitGlobalLogger(config *LogConfig) {
-	once.Do(func() {
-		if config == nil {
-			config = DefaultLogConfig()
-		}
-		globalLogger = NewLogger(config)
-	})
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	if config == nil {
+		config = DefaultLogConfig()
+	}
+	globalLogger = NewLogger(config)
 }
 
 // GetGlobalLogger returns the global logger instance
 func GetGlobalLogger() *Logger {
+	globalMu.Lock()
+	defer globalMu.Unlock()
 	if globalLogger == nil {
-		InitGlobalLogger(nil)
+		globalLogger = NewLogger(DefaultLogConfig())
 	}
 	return globalLogger
 }

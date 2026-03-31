@@ -62,10 +62,10 @@ client:
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) -o $(BUILD_DIR)/$(CLIENT_BINARY) ./$(CMD_DIR)/client
 
-# Run tests
+# Run tests (excludes chaos/integration tests that require real server binaries)
 test:
 	@echo "Running tests..."
-	$(GOTEST) -v ./...
+	$(GOTEST) -v $(shell go list ./... | grep -v 'distkv/tests/chaos')
 
 # Clean build artifacts
 clean:

@@ -651,8 +651,8 @@ func (e *Engine) performLevelBasedCompaction(tracker *metrics.LatencyTracker) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
-	// Remove compacted tables from source level
-	e.sstables[sourceLevel] = make([]*SSTable, 0)
+	// Remove only the compacted tables from source level (not any newly added ones)
+	e.sstables[sourceLevel] = e.removeCompactedTables(e.sstables[sourceLevel], sourceTables)
 
 	// Remove compacted tables from target level
 	e.sstables[targetLevel] = e.removeCompactedTables(e.sstables[targetLevel], targetTables)

@@ -49,7 +49,7 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        go test -v -race -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v 'distkv/tests/chaos')
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

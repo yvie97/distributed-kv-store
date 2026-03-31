@@ -261,13 +261,18 @@ func (mi *MergeIterator) Next() {
 	mi.current = nil
 }
 
-// advanceIterator moves the given iterator to its next entry and adds it back to heap.
+// advanceIterator moves the given iterator to its next entry and adds a new item to heap.
+// Creates a new heapItem instead of mutating the passed item, so the caller's item is unchanged.
 func (mi *MergeIterator) advanceIterator(item *heapItem) {
 	item.iterator.Next()
 	if item.iterator.Valid() {
-		item.key = item.iterator.Key()
-		item.entry = item.iterator.Value()
-		heap.Push(mi.heap, item)
+		next := &heapItem{
+			key:      item.iterator.Key(),
+			entry:    item.iterator.Value(),
+			iterator: item.iterator,
+			index:    item.index,
+		}
+		heap.Push(mi.heap, next)
 	}
 }
 
