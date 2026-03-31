@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -42,6 +42,7 @@ jobs:
         go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
         go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
         export PATH="$PATH:$(go env GOPATH)/bin"
+        chmod +x scripts/generate-proto.sh
         ./scripts/generate-proto.sh
 
     - name: Run tests
@@ -70,7 +71,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Generate protobuf files
       run: |
@@ -79,6 +80,7 @@ jobs:
         go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
         go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
         export PATH="$PATH:$(go env GOPATH)/bin"
+        chmod +x scripts/generate-proto.sh
         ./scripts/generate-proto.sh
 
     - name: Run golangci-lint
@@ -109,7 +111,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -132,6 +134,7 @@ jobs:
     - name: Generate protobuf files
       run: |
         export PATH="$PATH:$(go env GOPATH)/bin"
+        chmod +x scripts/generate-proto.sh
         ./scripts/generate-proto.sh
 
     - name: Build server
@@ -161,7 +164,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Install dependencies
       run: |
@@ -174,6 +177,7 @@ jobs:
     - name: Generate protobuf files
       run: |
         export PATH="$PATH:$(go env GOPATH)/bin"
+        chmod +x scripts/generate-proto.sh
         ./scripts/generate-proto.sh
 
     - name: Run integration tests
@@ -183,6 +187,8 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
 
     steps:
     - name: Checkout code
@@ -191,7 +197,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: '1.24'
 
     - name: Run Gosec Security Scanner
       uses: securego/gosec@master
@@ -199,7 +205,8 @@ jobs:
         args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
 
     - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
+      continue-on-error: true
       with:
         sarif_file: gosec-results.sarif
 
