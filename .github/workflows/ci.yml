@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -70,7 +70,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
 
     - name: Generate protobuf files
       run: |
@@ -109,7 +109,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -161,7 +161,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
 
     - name: Install dependencies
       run: |
@@ -191,7 +191,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.20'
+        go-version: '1.23'
 
     - name: Run Gosec Security Scanner
       uses: securego/gosec@master
