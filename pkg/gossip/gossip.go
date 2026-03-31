@@ -44,8 +44,7 @@ type Gossip struct {
 	started bool
 
 	// connectionPool manages reusable gRPC connections with health checking
-	connectionPool   *ConnectionPool
-	connectionsMutex sync.RWMutex
+	connectionPool *ConnectionPool
 
 	// logger is the component logger
 	logger *logging.Logger

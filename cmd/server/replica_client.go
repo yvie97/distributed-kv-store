@@ -246,16 +246,6 @@ func (rc *ReplicaClient) getNodeServiceClient(nodeID string) (proto.NodeServiceC
 	return proto.NewNodeServiceClient(conn), nil
 }
 
-// getDistKVClient gets a DistKV gRPC client for client-style operations
-func (rc *ReplicaClient) getDistKVClient(nodeID string) (proto.DistKVClient, error) {
-	conn, err := rc.getConnection(nodeID)
-	if err != nil {
-		return nil, err
-	}
-
-	return proto.NewDistKVClient(conn), nil
-}
-
 // getConnection gets or creates a gRPC connection to a node
 func (rc *ReplicaClient) getConnection(nodeID string) (*grpc.ClientConn, error) {
 	rc.mutex.Lock()

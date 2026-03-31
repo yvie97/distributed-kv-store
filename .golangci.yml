@@ -1,0 +1,15 @@
+run:
+  timeout: 5m
+
+issues:
+  exclude-rules:
+    # Test infrastructure files spawn real processes; unchecked errors are acceptable
+    - path: tests/
+      linters:
+        - errcheck
+        - unused
+        - staticcheck
+    # _test.go files: allow unchecked errors in test helpers
+    - path: _test\.go
+      linters:
+        - errcheck

@@ -144,10 +144,14 @@ func (am *AntiEntropyManager) syncWithPeer(ctx context.Context, peer PeerInfo, l
 		existing, _ := am.storageEngine.Get(entry.Key)
 		if existing == nil {
 			// We're missing this key entirely
-			am.storageEngine.Put(entry.Key, entry.Value, entry.VectorClock)
-		} else if entry.VectorClock != nil && entry.VectorClock.IsAfter(existing.VectorClock) {
+			if err := am.storageEngine.Put(entry.Key, entry.Value, entry.VectorClock); err != nil {
+				am.logger.WithError(err).WithField("key", entry.Key).Warn("Anti-entropy: failed to apply missing key")
+			}
+		} else if entry.VectorClock != nil && existing.VectorClock != nil && entry.VectorClock.IsAfter(existing.VectorClock) {
 			// Peer has a causally newer version
-			am.storageEngine.Put(entry.Key, entry.Value, entry.VectorClock)
+			if err := am.storageEngine.Put(entry.Key, entry.Value, entry.VectorClock); err != nil {
+				am.logger.WithError(err).WithField("key", entry.Key).Warn("Anti-entropy: failed to apply newer version")
+			}
 		}
 		// If concurrent (siblings), skip — read repair and application merge handle that
 	}

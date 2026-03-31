@@ -26,9 +26,8 @@ type PooledConnection struct {
 	conn         *grpc.ClientConn
 	address      string
 	lastUsed     time.Time
-	inUse        bool
-	createdAt    time.Time
-	failureCount int
+	inUse     bool
+	createdAt time.Time
 }
 
 // ConnectionPool manages a pool of gRPC connections.
