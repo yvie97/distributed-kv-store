@@ -168,6 +168,34 @@ func (rc *ReplicaClient) ReadReplica(ctx context.Context, nodeID string, key str
 	}, nil
 }
 
+// SyncRange implements replication.AntiEntropyPeerClient.
+// It sends localHash to the peer via the AntiEntropy RPC and returns
+// entries the peer has that may differ from our local state.
+func (rc *ReplicaClient) SyncRange(ctx context.Context, nodeID string, localHash string) ([]replication.AntiEntropyEntry, error) {
+	client, err := rc.getNodeServiceClient(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to node %s: %v", nodeID, err)
+	}
+
+	resp, err := client.AntiEntropy(ctx, &proto.AntiEntropyRequest{
+		MerkleTree: &proto.MerkleNode{Hash: localHash},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("AntiEntropy RPC to %s failed: %v", nodeID, err)
+	}
+
+	entries := make([]replication.AntiEntropyEntry, 0, len(resp.MissingKeys))
+	for _, kv := range resp.MissingKeys {
+		entries = append(entries, replication.AntiEntropyEntry{
+			Key:         kv.Key,
+			Value:       kv.Value,
+			VectorClock: convertVectorClockFromProto(kv.VectorClock),
+			IsDeleted:   kv.IsDeleted,
+		})
+	}
+	return entries, nil
+}
+
 // UpdateNodeAddress updates the network address for a node
 // This is called when we discover nodes through gossip or configuration
 func (rc *ReplicaClient) UpdateNodeAddress(nodeID, address string) {

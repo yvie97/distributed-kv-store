@@ -78,6 +78,9 @@ type DistKVServer struct {
 	// Node management
 	nodeSelector  *NodeSelector
 	replicaClient *ReplicaClient
+
+	// Background repair
+	antiEntropy *replication.AntiEntropyManager
 }
 
 // main is the entry point for the DistKV server
@@ -327,6 +330,15 @@ func NewDistKVServer(config *ServerConfig) (*DistKVServer, error) {
 		return nil, fmt.Errorf("failed to create quorum manager: %v", err)
 	}
 
+	// Initialize anti-entropy manager (30-second sync interval)
+	antiEntropy := replication.NewAntiEntropyManager(
+		config.NodeID,
+		storageEngine,
+		&gossipPeerProvider{gossipManager},
+		replicaClient,
+		30*time.Second,
+	)
+
 	return &DistKVServer{
 		config:         config,
 		storageEngine:  storageEngine,
@@ -335,7 +347,22 @@ func NewDistKVServer(config *ServerConfig) (*DistKVServer, error) {
 		gossipManager:  gossipManager,
 		nodeSelector:   nodeSelector,
 		replicaClient:  replicaClient,
+		antiEntropy:    antiEntropy,
 	}, nil
+}
+
+// gossipPeerProvider adapts gossip.Gossip to replication.PeerProvider.
+type gossipPeerProvider struct {
+	g *gossip.Gossip
+}
+
+func (gp *gossipPeerProvider) GetAlivePeers() []replication.PeerInfo {
+	nodes := gp.g.GetAliveNodes()
+	peers := make([]replication.PeerInfo, len(nodes))
+	for i, n := range nodes {
+		peers[i] = replication.PeerInfo{NodeID: n.NodeID}
+	}
+	return peers
 }
 
 // Start starts the DistKV server
@@ -371,6 +398,9 @@ func (s *DistKVServer) Start() error {
 		return fmt.Errorf("failed to start gRPC server: %v", err)
 	}
 
+	// Start anti-entropy background repair
+	s.antiEntropy.Start()
+
 	logger.Info("DistKV server started successfully")
 	return nil
 }
@@ -382,6 +412,11 @@ func (s *DistKVServer) Stop() error {
 	logger.Info("Initiating graceful shutdown")
 
 	var shutdownErrors []error
+
+	// Stop anti-entropy background repair
+	if s.antiEntropy != nil {
+		s.antiEntropy.Stop()
+	}
 
 	// Stop accepting new requests - stop gRPC server
 	if s.grpcServer != nil {

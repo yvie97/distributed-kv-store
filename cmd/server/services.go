@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 
@@ -230,16 +232,43 @@ func (s *NodeServiceImpl) Replicate(ctx context.Context, req *proto.ReplicateReq
 	}, nil
 }
 
-// AntiEntropy handles anti-entropy repair requests (simplified implementation)
+// AntiEntropy handles anti-entropy repair requests.
+// The caller sends its local data hash; if our hash differs we return all our
+// non-deleted entries so the caller can apply anything it's missing or behind on.
 func (s *NodeServiceImpl) AntiEntropy(ctx context.Context, req *proto.AntiEntropyRequest) (*proto.AntiEntropyResponse, error) {
-	// This is a placeholder for anti-entropy repair
-	// A full implementation would compare Merkle trees and return differing keys
-	log.Printf("AntiEntropy request received for range %s to %s", req.KeyRangeStart, req.KeyRangeEnd)
+	iter, err := s.server.storageEngine.Iterator()
+	if err != nil {
+		log.Printf("AntiEntropy: failed to open iterator: %v", err)
+		return &proto.AntiEntropyResponse{}, nil
+	}
+	defer iter.Close()
 
-	return &proto.AntiEntropyResponse{
-		MissingKeys:    []*proto.KeyValue{},
-		ConflictedKeys: []*proto.KeyValue{},
-	}, nil
+	h := sha256.New()
+	var entries []*proto.KeyValue
+	for iter.Valid() {
+		entry := iter.Value()
+		if entry != nil && !entry.Deleted {
+			fmt.Fprintf(h, "%s:%x\n", entry.Key, entry.Value)
+			kv := &proto.KeyValue{
+				Key:   entry.Key,
+				Value: entry.Value,
+			}
+			if entry.VectorClock != nil {
+				kv.VectorClock = convertVectorClockToProto(entry.VectorClock)
+			}
+			entries = append(entries, kv)
+		}
+		iter.Next()
+	}
+
+	localHash := hex.EncodeToString(h.Sum(nil))
+
+	// If the caller's hash matches ours, data is in sync — return nothing.
+	if req.MerkleTree != nil && req.MerkleTree.Hash == localHash {
+		return &proto.AntiEntropyResponse{}, nil
+	}
+
+	return &proto.AntiEntropyResponse{MissingKeys: entries}, nil
 }
 
 // Gossip handles gossip protocol messages

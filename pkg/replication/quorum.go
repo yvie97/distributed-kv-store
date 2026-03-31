@@ -166,6 +166,7 @@ type StorageEngine interface {
 	Put(key string, value []byte, vectorClock *consensus.VectorClock) error
 	Get(key string) (*storage.Entry, error)
 	Delete(key string, vectorClock *consensus.VectorClock) error
+	Iterator() (storage.Iterator, error)
 }
 
 // NewQuorumManager creates a new quorum manager.

@@ -113,6 +113,25 @@ func (m *MockStorageEngine) Delete(key string, vectorClock *consensus.VectorCloc
 	return nil
 }
 
+func (m *MockStorageEngine) Iterator() (storage.Iterator, error) {
+	entries := make([]*storage.Entry, 0, len(m.data))
+	for _, e := range m.data {
+		entries = append(entries, e)
+	}
+	return &mockIterator{entries: entries, index: 0}, nil
+}
+
+type mockIterator struct {
+	entries []*storage.Entry
+	index   int
+}
+
+func (it *mockIterator) Valid() bool          { return it.index < len(it.entries) }
+func (it *mockIterator) Key() string          { return it.entries[it.index].Key }
+func (it *mockIterator) Value() *storage.Entry { return it.entries[it.index] }
+func (it *mockIterator) Next()                { it.index++ }
+func (it *mockIterator) Close() error         { return nil }
+
 // TestDefaultQuorumConfig tests the default configuration
 func TestDefaultQuorumConfig(t *testing.T) {
 	config := DefaultQuorumConfig()
