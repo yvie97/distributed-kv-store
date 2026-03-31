@@ -11,6 +11,8 @@ DistKV is a highly available, scalable distributed key-value store inspired by A
 - **Gossip Protocol**: Complete network-based gossip implementation for cluster coordination and failure detection
 - **Consistent Hashing**: Virtual node-based partitioning with minimal data movement when scaling
 - **Vector Clocks**: Conflict detection and causality tracking with Dynamo-style sibling preservation
+- **Read Repair**: Stale replicas are automatically updated in the background during quorum reads
+- **Anti-Entropy**: Background hash-based sync detects and repairs divergent data across nodes
 - **TLS Security**: Production-ready TLS 1.2+ encryption for all client-server and inter-node communication
 
 ## 📋 System Requirements
@@ -154,6 +156,8 @@ scripts\stop-cluster.bat
 - **Partitioning**: Consistent hashing with configurable virtual nodes
 - **Replication**: Configurable quorum-based consensus (default: N=3, R=2, W=2)
 - **Conflict Resolution**: Vector clocks with Dynamo-style sibling preservation for concurrent updates
+- **Read Repair**: Coordinator detects stale replicas during quorum reads and pushes newer versions asynchronously
+- **Anti-Entropy**: Background 30-second sync loop; nodes exchange a hash of all local entries and apply any missing or causally newer keys from peers
 - **Failure Detection**: Network-based gossip protocol with heartbeat monitoring
 - **Communication**: gRPC with optimized connection pooling
   - Connection pool with health monitoring and automatic reconnection
