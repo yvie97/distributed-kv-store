@@ -23,9 +23,9 @@ type ConnectionPoolConfig struct {
 
 // PooledConnection wraps a gRPC connection with metadata.
 type PooledConnection struct {
-	conn         *grpc.ClientConn
-	address      string
-	lastUsed     time.Time
+	conn      *grpc.ClientConn
+	address   string
+	lastUsed  time.Time
 	inUse     bool
 	createdAt time.Time
 }

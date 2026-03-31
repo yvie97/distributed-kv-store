@@ -15,7 +15,7 @@ type MetricsCollector struct {
 	gossip      *GossipMetrics
 	network     *NetworkMetrics
 	system      *SystemMetrics
-	startTime time.Time
+	startTime   time.Time
 }
 
 // StorageMetrics tracks storage engine performance

@@ -126,11 +126,11 @@ type mockIterator struct {
 	index   int
 }
 
-func (it *mockIterator) Valid() bool          { return it.index < len(it.entries) }
-func (it *mockIterator) Key() string          { return it.entries[it.index].Key }
+func (it *mockIterator) Valid() bool           { return it.index < len(it.entries) }
+func (it *mockIterator) Key() string           { return it.entries[it.index].Key }
 func (it *mockIterator) Value() *storage.Entry { return it.entries[it.index] }
-func (it *mockIterator) Next()                { it.index++ }
-func (it *mockIterator) Close() error         { return nil }
+func (it *mockIterator) Next()                 { it.index++ }
+func (it *mockIterator) Close() error          { return nil }
 
 // TestDefaultQuorumConfig tests the default configuration
 func TestDefaultQuorumConfig(t *testing.T) {

@@ -901,7 +901,6 @@ func (e *Engine) flushCompactedMemTable(memTable *MemTable, level int) (*SSTable
 	return newSSTable, nil
 }
 
-
 // cleanupOldSSTables closes and deletes old SSTable files after compaction.
 func (e *Engine) cleanupOldSSTables(oldTables interface{}) {
 	// Handle both []*SSTable and [][]*SSTable
