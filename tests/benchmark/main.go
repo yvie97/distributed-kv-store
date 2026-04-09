@@ -7,6 +7,14 @@
 // Start a local cluster first:
 //
 //	make dev-cluster
+//
+// Availability test (manual):
+//
+//	While the benchmark is running, kill one node to verify requests keep succeeding:
+//	  pkill -f "distkv-server.*node2"
+//	Requests should continue succeeding (quorum still reachable with 2 of 3 nodes).
+//	Restart the node and confirm it rejoins:
+//	  ./build/distkv-server --node-id=node2 --address=localhost:8081 --data-dir=data2 --seed-nodes=localhost:8080 &
 package main
 
 import (
