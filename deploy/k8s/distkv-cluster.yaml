@@ -93,7 +93,7 @@ metadata:
 spec:
   serviceName: distkv-headless
   replicas: 3
-  podManagementPolicy: Parallel  # Start all pods simultaneously
+  podManagementPolicy: OrderedReady  # Start pods one at a time so each joins an already-running seed
   selector:
     matchLabels:
       app: distkv
@@ -151,6 +151,8 @@ spec:
         # Server configuration
         - name: ADDRESS
           value: "0.0.0.0:8080"
+        - name: ADVERTISE_ADDRESS
+          value: "$(POD_IP):8080"
         - name: DATA_DIR
           value: "/data"
 
@@ -185,6 +187,7 @@ spec:
         args:
         - "-node-id=$(NODE_ID)"
         - "-address=$(ADDRESS)"
+        - "-advertise-address=$(ADVERTISE_ADDRESS)"
         - "-data-dir=$(DATA_DIR)"
         - "-seed-nodes=$(SEED_NODES)"
         - "-replicas=$(REPLICAS)"

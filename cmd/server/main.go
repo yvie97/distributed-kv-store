@@ -36,9 +36,10 @@ import (
 // ServerConfig holds all configuration for the DistKV server
 type ServerConfig struct {
 	// Server identification
-	NodeID  string // Unique identifier for this node
-	Address string // Address this server listens on (e.g., "localhost:8080")
-	DataDir string // Directory to store data files
+	NodeID           string // Unique identifier for this node
+	Address          string // Bind address (e.g., "0.0.0.0:8080")
+	AdvertiseAddress string // Address advertised to peers; defaults to Address
+	DataDir          string // Directory to store data files
 
 	// Cluster configuration
 	SeedNodes    []string // List of seed nodes to join the cluster
@@ -146,9 +147,10 @@ func main() {
 // parseFlags parses command line arguments and returns server configuration
 func parseFlags() *ServerConfig {
 	var (
-		nodeID       = flag.String("node-id", "", "Unique node identifier (required)")
-		address      = flag.String("address", "localhost:8080", "Server listen address")
-		dataDir      = flag.String("data-dir", "./data", "Directory for data storage")
+		nodeID           = flag.String("node-id", "", "Unique node identifier (required)")
+		address          = flag.String("address", "localhost:8080", "Server listen address")
+		advertiseAddress = flag.String("advertise-address", "", "Address advertised to cluster peers (defaults to --address)")
+		dataDir          = flag.String("data-dir", "./data", "Directory for data storage")
 		seedNodes    = flag.String("seed-nodes", "", "Comma-separated list of seed nodes")
 		virtualNodes = flag.Int("virtual-nodes", 150, "Number of virtual nodes for consistent hashing")
 
@@ -185,6 +187,11 @@ func parseFlags() *ServerConfig {
 		*nodeID = generateNodeID(*address)
 	}
 
+	// Default advertise address to bind address
+	if *advertiseAddress == "" {
+		*advertiseAddress = *address
+	}
+
 	// Parse seed nodes
 	var seedNodesList []string
 	if *seedNodes != "" {
@@ -212,11 +219,12 @@ func parseFlags() *ServerConfig {
 	}
 
 	return &ServerConfig{
-		NodeID:       *nodeID,
-		Address:      *address,
-		DataDir:      *dataDir,
-		SeedNodes:    seedNodesList,
-		VirtualNodes: *virtualNodes,
+		NodeID:           *nodeID,
+		Address:          *address,
+		AdvertiseAddress: *advertiseAddress,
+		DataDir:          *dataDir,
+		SeedNodes:        seedNodesList,
+		VirtualNodes:     *virtualNodes,
 
 		StorageConfig: &storage.StorageConfig{
 			MemTableMaxSize:     *memTableSize,
@@ -312,8 +320,8 @@ func NewDistKVServer(config *ServerConfig) (*DistKVServer, error) {
 	// Initialize consistent hashing
 	consistentHash := partition.NewConsistentHash(config.VirtualNodes)
 
-	// Initialize gossip manager
-	gossipManager := gossip.NewGossip(config.NodeID, config.Address, config.GossipConfig)
+	// Initialize gossip manager (use AdvertiseAddress so peers can reach us)
+	gossipManager := gossip.NewGossip(config.NodeID, config.AdvertiseAddress, config.GossipConfig)
 
 	// Create node selector and replica client
 	nodeSelector := NewNodeSelector(consistentHash, gossipManager)
@@ -383,8 +391,8 @@ func (s *DistKVServer) Start() error {
 	// Add self to consistent hash ring
 	s.consistentHash.AddNode(s.config.NodeID)
 
-	// Add self to gossip manager (always mark self as alive)
-	s.gossipManager.AddNode(s.config.NodeID, s.config.Address)
+	// Add self to gossip manager with the advertise address
+	s.gossipManager.AddNode(s.config.NodeID, s.config.AdvertiseAddress)
 
 	// Join cluster by connecting to seed nodes
 	if err := s.joinCluster(); err != nil {
@@ -531,7 +539,7 @@ func (s *DistKVServer) joinCluster() error {
 	}
 
 	// Also add self to replica client for local operations
-	s.replicaClient.UpdateNodeAddress(s.config.NodeID, s.config.Address)
+	s.replicaClient.UpdateNodeAddress(s.config.NodeID, s.config.AdvertiseAddress)
 
 	// Announce ourselves to the cluster
 	for _, seedAddress := range s.config.SeedNodes {
@@ -632,10 +640,10 @@ func (s *DistKVServer) announceSelfToNode(targetAddress string) error {
 	// Get admin service client
 	adminClient := proto.NewAdminServiceClient(conn)
 
-	// Announce ourselves using AddNode
+	// Announce ourselves using AddNode (with advertise address so peers can reach us)
 	req := &proto.AddNodeRequest{
 		NodeId:       s.config.NodeID,
-		NodeAddress:  s.config.Address,
+		NodeAddress:  s.config.AdvertiseAddress,
 		VirtualNodes: int32(s.config.VirtualNodes),
 	}
 
