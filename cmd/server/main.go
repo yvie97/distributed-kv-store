@@ -151,8 +151,8 @@ func parseFlags() *ServerConfig {
 		address          = flag.String("address", "localhost:8080", "Server listen address")
 		advertiseAddress = flag.String("advertise-address", "", "Address advertised to cluster peers (defaults to --address)")
 		dataDir          = flag.String("data-dir", "./data", "Directory for data storage")
-		seedNodes    = flag.String("seed-nodes", "", "Comma-separated list of seed nodes")
-		virtualNodes = flag.Int("virtual-nodes", 150, "Number of virtual nodes for consistent hashing")
+		seedNodes        = flag.String("seed-nodes", "", "Comma-separated list of seed nodes")
+		virtualNodes     = flag.Int("virtual-nodes", 150, "Number of virtual nodes for consistent hashing")
 
 		// Storage flags
 		memTableSize     = flag.Int("mem-table-size", 1024, "MemTable size in bytes")

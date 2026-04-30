@@ -41,10 +41,10 @@ const (
 )
 
 func main() {
-	server      := flag.String("server", "localhost:8080", "DistKV server address")
+	server := flag.String("server", "localhost:8080", "DistKV server address")
 	clusterSize := flag.Int("nodes", 3, "Number of nodes in the cluster")
-	replicas    := flag.Int("replicas", 3, "Replication factor (N)")
-	readQuorum  := flag.Int("read-quorum", 2, "Read quorum (R)")
+	replicas := flag.Int("replicas", 3, "Replication factor (N)")
+	readQuorum := flag.Int("read-quorum", 2, "Read quorum (R)")
 	writeQuorum := flag.Int("write-quorum", 2, "Write quorum (W)")
 	flag.Parse()
 
