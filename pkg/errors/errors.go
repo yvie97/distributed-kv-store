@@ -162,22 +162,6 @@ func captureStackTrace() string {
 	return sb.String()
 }
 
-// IsCode checks if an error has a specific error code
-func IsCode(err error, code ErrorCode) bool {
-	if dkvErr, ok := err.(*DistKVError); ok {
-		return dkvErr.Code == code
-	}
-	return false
-}
-
-// IsRetryableError checks if an error is retryable
-func IsRetryableError(err error) bool {
-	if dkvErr, ok := err.(*DistKVError); ok {
-		return dkvErr.Retryable
-	}
-	return false
-}
-
 // Common error constructors for convenience
 
 // NewStorageClosedError creates a storage closed error
@@ -185,24 +169,11 @@ func NewStorageClosedError() *DistKVError {
 	return New(ErrCodeStorageClosed, "storage engine is closed")
 }
 
-// NewKeyNotFoundError creates a key not found error
-func NewKeyNotFoundError(key string) *DistKVError {
-	return New(ErrCodeKeyNotFound, "key not found").
-		WithContext("key", key)
-}
-
 // NewQuorumFailedError creates a quorum failed error
 func NewQuorumFailedError(needed, got int) *DistKVError {
 	return New(ErrCodeQuorumFailed, "quorum requirements not met").
 		WithContext("needed", needed).
 		WithContext("got", got).
-		WithRetryable(true)
-}
-
-// NewConnectionError creates a connection error
-func NewConnectionError(address string, cause error) *DistKVError {
-	return Wrap(cause, ErrCodeConnectionFailed, "failed to connect to node").
-		WithContext("address", address).
 		WithRetryable(true)
 }
 

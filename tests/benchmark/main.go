@@ -55,7 +55,7 @@ func main() {
 	// Pre-load keys
 	fmt.Printf("Pre-loading %d keys into %s...\n", numKeys, *server)
 	preload(client, numKeys)
-	fmt.Println("Pre-load done.\n")
+	fmt.Println("Pre-load done.")
 
 	// Phase 1: read-only, sweep concurrency
 	fmt.Println("=== Phase 1: Read-only benchmark ===")

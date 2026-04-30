@@ -186,10 +186,6 @@ func TestWithRetryable(t *testing.T) {
 		if !err.IsRetryable() {
 			t.Error("Expected error to be retryable")
 		}
-
-		if !IsRetryableError(err) {
-			t.Error("Expected IsRetryableError to return true")
-		}
 	})
 
 	t.Run("non-retryable error", func(t *testing.T) {
@@ -199,83 +195,7 @@ func TestWithRetryable(t *testing.T) {
 		if err.IsRetryable() {
 			t.Error("Expected error to not be retryable")
 		}
-
-		if IsRetryableError(err) {
-			t.Error("Expected IsRetryableError to return false")
-		}
 	})
-}
-
-// TestIsCode tests checking error codes
-func TestIsCode(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		code     ErrorCode
-		expected bool
-	}{
-		{
-			name:     "matching code",
-			err:      New(ErrCodeKeyNotFound, "not found"),
-			code:     ErrCodeKeyNotFound,
-			expected: true,
-		},
-		{
-			name:     "non-matching code",
-			err:      New(ErrCodeKeyNotFound, "not found"),
-			code:     ErrCodeInternal,
-			expected: false,
-		},
-		{
-			name:     "standard error",
-			err:      fmt.Errorf("standard error"),
-			code:     ErrCodeInternal,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsCode(tt.err, tt.code)
-			if result != tt.expected {
-				t.Errorf("Expected %v, got %v", tt.expected, result)
-			}
-		})
-	}
-}
-
-// TestIsRetryableError tests checking if errors are retryable
-func TestIsRetryableError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "retryable DistKVError",
-			err:      New(ErrCodeTimeout, "timeout").WithRetryable(true),
-			expected: true,
-		},
-		{
-			name:     "non-retryable DistKVError",
-			err:      New(ErrCodeInvalidKey, "invalid").WithRetryable(false),
-			expected: false,
-		},
-		{
-			name:     "standard error",
-			err:      fmt.Errorf("standard error"),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsRetryableError(tt.err)
-			if result != tt.expected {
-				t.Errorf("Expected %v, got %v", tt.expected, result)
-			}
-		})
-	}
 }
 
 // TestCommonErrorConstructors tests convenience error constructors
@@ -284,16 +204,6 @@ func TestCommonErrorConstructors(t *testing.T) {
 		err := NewStorageClosedError()
 		if err.Code != ErrCodeStorageClosed {
 			t.Error("Expected STORAGE_CLOSED code")
-		}
-	})
-
-	t.Run("NewKeyNotFoundError", func(t *testing.T) {
-		err := NewKeyNotFoundError("user:123")
-		if err.Code != ErrCodeKeyNotFound {
-			t.Error("Expected KEY_NOT_FOUND code")
-		}
-		if err.Context["key"] != "user:123" {
-			t.Error("Expected key context to be set")
 		}
 	})
 
@@ -310,20 +220,6 @@ func TestCommonErrorConstructors(t *testing.T) {
 		}
 		if !err.IsRetryable() {
 			t.Error("Expected quorum error to be retryable")
-		}
-	})
-
-	t.Run("NewConnectionError", func(t *testing.T) {
-		cause := fmt.Errorf("connection refused")
-		err := NewConnectionError("localhost:8080", cause)
-		if err.Code != ErrCodeConnectionFailed {
-			t.Error("Expected CONNECTION_FAILED code")
-		}
-		if err.Context["address"] != "localhost:8080" {
-			t.Error("Expected address context to be set")
-		}
-		if !err.IsRetryable() {
-			t.Error("Expected connection error to be retryable")
 		}
 	})
 

@@ -45,6 +45,9 @@ proto/*.pb.go
 coverage.out
 *.cover
 
+# Design/interview documents (local reference only)
+kvstore-design-doc.md
+
 # Environment files
 .env
 .env.local

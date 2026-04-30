@@ -8,8 +8,8 @@
 # Build stage
 FROM golang:1.24-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git
+# Install build dependencies (protobuf compiler needed for proto generation)
+RUN apk add --no-cache git protobuf protobuf-dev
 
 # Set working directory
 WORKDIR /app
@@ -20,8 +20,18 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy source code (includes pre-generated proto files)
+# Install protoc Go plugins
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Copy source code
 COPY . .
+
+# Generate protobuf files
+RUN protoc --proto_path=proto \
+    --go_out=proto --go_opt=paths=source_relative \
+    --go-grpc_out=proto --go-grpc_opt=paths=source_relative \
+    proto/*.proto
 
 # Build binaries
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o distkv-server ./cmd/server
