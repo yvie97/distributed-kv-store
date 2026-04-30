@@ -20,9 +20,9 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Install protoc Go plugins
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Install protoc Go plugins (pinned to match go.mod and generate-proto.sh)
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.31.0
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
 
 # Copy source code
 COPY . .
