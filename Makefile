@@ -28,7 +28,7 @@ CMD_DIR=cmd
 PROTO_FILES=$(wildcard $(PROTO_DIR)/*.proto)
 PROTO_GO_FILES=$(PROTO_FILES:.proto=.pb.go)
 
-.PHONY: all clean build server client proto test deps help run-server run-client
+.PHONY: all clean build server client proto test benchmark chaos-test deps help run-server run-client
 
 # Default target
 all: deps proto build
@@ -66,6 +66,17 @@ client:
 test:
 	@echo "Running tests..."
 	$(GOTEST) -v $(shell go list ./... | grep -v 'distkv/tests/')
+
+# Run benchmark against a running dev cluster (make dev-cluster first)
+benchmark: client
+	@echo "Running benchmark (requires a running cluster on localhost:8080)..."
+	@echo "Start one with: make dev-cluster"
+	$(GOCMD) run ./tests/benchmark -server=localhost:8080 -nodes=3 -replicas=3 -read-quorum=2 -write-quorum=2
+
+# Run chaos/failure tests (requires compiled server binary)
+chaos-test: build
+	@echo "Running chaos tests..."
+	$(GOTEST) -v -timeout=300s ./tests/chaos/...
 
 # Clean build artifacts
 clean:
@@ -178,7 +189,9 @@ help:
 	@echo "  build        - Build server and client binaries"
 	@echo "  server       - Build server binary only"
 	@echo "  client       - Build client binary only"
-	@echo "  test         - Run all tests"
+	@echo "  test         - Run all unit tests"
+	@echo "  benchmark    - Run QPS/latency benchmark (requires running cluster)"
+	@echo "  chaos-test   - Run failure/chaos tests (node crash, partition, scale-out)"
 	@echo "  clean        - Clean build artifacts"
 	@echo "  run-server   - Run server in development mode"
 	@echo "  run-client   - Run client with help"

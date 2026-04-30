@@ -622,6 +622,102 @@ func TestPartitionCausesSiblings(t *testing.T) {
 	}
 }
 
+// TestClusterScaleOut tests that a new node can join an existing cluster,
+// receive data via anti-entropy, and participate in quorum operations.
+func TestClusterScaleOut(t *testing.T) {
+	cluster := SetupChaosCluster(t, 3)
+	defer cluster.TearDown()
+
+	ctx := context.Background()
+	client := cluster.nodes[0].client
+
+	// Write initial data to the 3-node cluster
+	const keyCount = 20
+	for i := 0; i < keyCount; i++ {
+		resp, err := client.Put(ctx, &proto.PutRequest{
+			Key:              fmt.Sprintf("scale-key-%d", i),
+			Value:            []byte(fmt.Sprintf("value-%d", i)),
+			ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+		})
+		if err != nil {
+			t.Fatalf("Pre-scale put %d: %v", i, err)
+		}
+		if !resp.Success {
+			t.Fatalf("Pre-scale put %d failed: %s", i, resp.ErrorMessage)
+		}
+	}
+
+	// Add a 4th node that joins via node-0 as seed
+	newPort := 9083
+	newNode := &ChaosNode{
+		nodeID:  "chaos-node4",
+		address: fmt.Sprintf("localhost:%d", newPort),
+		port:    newPort,
+	}
+	cluster.nodes = append(cluster.nodes, newNode)
+
+	if err := cluster.startNode(3, cluster.nodes[0].address); err != nil {
+		t.Fatalf("Failed to start 4th node: %v", err)
+	}
+
+	// Connect client to the new node
+	conn, err := grpc.Dial(newNode.address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("Failed to connect to new node: %v", err)
+	}
+	newNode.conn = conn
+	newNode.client = proto.NewDistKVClient(conn)
+
+	// Wait for the new node to join gossip and anti-entropy to propagate data
+	// (anti-entropy runs every 30s; give it one full cycle plus buffer)
+	t.Log("Waiting for new node to sync via anti-entropy (35s)...")
+	time.Sleep(35 * time.Second)
+
+	// New node should serve quorum reads for pre-existing keys
+	misses := 0
+	for i := 0; i < keyCount; i++ {
+		resp, err := newNode.client.Get(ctx, &proto.GetRequest{
+			Key:              fmt.Sprintf("scale-key-%d", i),
+			ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+		})
+		if err != nil || !resp.Found {
+			misses++
+		}
+	}
+	if misses > 0 {
+		t.Errorf("New node missed %d/%d keys via quorum read after scale-out", misses, keyCount)
+	} else {
+		t.Logf("New node served all %d pre-existing keys via quorum read", keyCount)
+	}
+
+	// Writes to the cluster should still succeed (quorum still satisfiable with 4 nodes)
+	putResp, err := newNode.client.Put(ctx, &proto.PutRequest{
+		Key:              "post-scale-write",
+		Value:            []byte("written-after-scale-out"),
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	})
+	if err != nil {
+		t.Fatalf("Write via new node failed: %v", err)
+	}
+	if !putResp.Success {
+		t.Fatalf("Write via new node rejected: %s", putResp.ErrorMessage)
+	}
+
+	// Original nodes can read the write from the new node
+	getResp, err := client.Get(ctx, &proto.GetRequest{
+		Key:              "post-scale-write",
+		ConsistencyLevel: proto.ConsistencyLevel_QUORUM,
+	})
+	if err != nil {
+		t.Fatalf("Original node read failed: %v", err)
+	}
+	if !getResp.Found || string(getResp.Value) != "written-after-scale-out" {
+		t.Errorf("Original node got wrong value after scale-out: found=%v value=%q",
+			getResp.Found, string(getResp.Value))
+	}
+	t.Log("Scale-out: all checks passed — new node joined, synced, and participates in quorum")
+}
+
 // Helper functions
 
 func contains(slice []int, item int) bool {

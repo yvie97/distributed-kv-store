@@ -1,4 +1,4 @@
-// Benchmark tool for DistKV — measures QPS and p99 read latency.
+// Benchmark tool for DistKV — measures QPS and latency percentiles.
 //
 // Usage:
 //
@@ -35,13 +35,17 @@ import (
 )
 
 const (
-	numKeys       = 10_000
+	numKeys       = 1_000
 	valueSize     = 64
-	benchDuration = 10 * time.Second
+	benchDuration = 5 * time.Second
 )
 
 func main() {
-	server := flag.String("server", "localhost:8080", "DistKV server address")
+	server      := flag.String("server", "localhost:8080", "DistKV server address")
+	clusterSize := flag.Int("nodes", 3, "Number of nodes in the cluster")
+	replicas    := flag.Int("replicas", 3, "Replication factor (N)")
+	readQuorum  := flag.Int("read-quorum", 2, "Read quorum (R)")
+	writeQuorum := flag.Int("write-quorum", 2, "Write quorum (W)")
 	flag.Parse()
 
 	conn, err := grpc.Dial(*server, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -52,42 +56,54 @@ func main() {
 	defer conn.Close()
 	client := proto.NewDistKVClient(conn)
 
+	fmt.Printf("Cluster: %d nodes  |  N=%d R=%d W=%d\n\n",
+		*clusterSize, *replicas, *readQuorum, *writeQuorum)
+
 	// Pre-load keys
 	fmt.Printf("Pre-loading %d keys into %s...\n", numKeys, *server)
 	preload(client, numKeys)
 	fmt.Println("Pre-load done.")
 
-	// Phase 1: read-only, sweep concurrency
-	fmt.Println("=== Phase 1: Read-only benchmark ===")
-	fmt.Printf("%-12s %-12s %-12s\n", "Concurrency", "QPS", "p99 (ms)")
+	header := fmt.Sprintf("%-12s %-12s %-10s %-10s %-10s %-10s",
+		"Concurrency", "QPS", "p50(ms)", "p95(ms)", "p99(ms)", "Errors%")
+	divider := fmt.Sprintf("%-12s %-12s %-10s %-10s %-10s %-10s",
+		"───────────", "───────────", "────────", "────────", "────────", "────────")
+
+	// Phase 1: read-only
+	fmt.Println("\n=== Phase 1: Read-only ===")
+	fmt.Println(header)
+	fmt.Println(divider)
 	readMaxQPS := 0.0
 	for _, c := range []int{10, 25, 50, 100, 150, 200} {
-		qps, p99 := runBenchmark(client, c, 1.0)
+		qps, p50, p95, p99, errRate := runBenchmark(client, c, 1.0)
 		marker := ""
 		if p99 > 10 {
-			marker = "  ← p99 > 10ms"
+			marker = "  ← p99>10ms"
 		} else {
 			readMaxQPS = qps
 		}
-		fmt.Printf("%-12d %-12.0f %-12.2f%s\n", c, qps, p99, marker)
+		fmt.Printf("%-12d %-12.0f %-10.2f %-10.2f %-10.2f %-10.2f%s\n",
+			c, qps, p50, p95, p99, errRate, marker)
 	}
-	fmt.Printf("\nMax read QPS with p99 < 10ms: %.0f\n\n", readMaxQPS)
+	fmt.Printf("\nPeak read QPS (p99<10ms): %.0f\n", readMaxQPS)
 
-	// Phase 2: mixed read/write (50/50), sweep concurrency
-	fmt.Println("=== Phase 2: Mixed read/write benchmark (50/50) ===")
-	fmt.Printf("%-12s %-12s %-12s\n", "Concurrency", "QPS", "p99 (ms)")
+	// Phase 2: mixed 50/50
+	fmt.Println("\n=== Phase 2: Mixed read/write (50/50) ===")
+	fmt.Println(header)
+	fmt.Println(divider)
 	mixedMaxQPS := 0.0
 	for _, c := range []int{10, 25, 50, 100, 150, 200} {
-		qps, p99 := runBenchmark(client, c, 0.5)
+		qps, p50, p95, p99, errRate := runBenchmark(client, c, 0.5)
 		marker := ""
 		if p99 > 10 {
-			marker = "  ← p99 > 10ms"
+			marker = "  ← p99>10ms"
 		} else {
 			mixedMaxQPS = qps
 		}
-		fmt.Printf("%-12d %-12.0f %-12.2f%s\n", c, qps, p99, marker)
+		fmt.Printf("%-12d %-12.0f %-10.2f %-10.2f %-10.2f %-10.2f%s\n",
+			c, qps, p50, p95, p99, errRate, marker)
 	}
-	fmt.Printf("\nMax mixed QPS with p99 < 10ms: %.0f\n", mixedMaxQPS)
+	fmt.Printf("\nPeak mixed QPS (p99<10ms): %.0f\n", mixedMaxQPS)
 }
 
 // preload writes numKeys random key-value pairs into the cluster.
@@ -105,13 +121,14 @@ func preload(client proto.DistKVClient, n int) {
 	}
 }
 
-// runBenchmark runs a benchmark for benchDuration seconds with the given
-// concurrency and read ratio, and returns (QPS, p99_ms).
-func runBenchmark(client proto.DistKVClient, concurrency int, readRatio float64) (float64, float64) {
+// runBenchmark runs a benchmark for benchDuration with the given concurrency
+// and read ratio, returning (QPS, p50_ms, p95_ms, p99_ms, errorRate%).
+func runBenchmark(client proto.DistKVClient, concurrency int, readRatio float64) (qps, p50, p95, p99, errRate float64) {
 	var (
 		mu        sync.Mutex
 		latencies []time.Duration
 		totalOps  int64
+		totalErrs int64
 		stop      = make(chan struct{})
 		wg        sync.WaitGroup
 	)
@@ -120,6 +137,7 @@ func runBenchmark(client proto.DistKVClient, concurrency int, readRatio float64)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			value := make([]byte, valueSize)
 			for {
 				select {
 				case <-stop:
@@ -129,15 +147,22 @@ func runBenchmark(client proto.DistKVClient, concurrency int, readRatio float64)
 				key := fmt.Sprintf("bench-key-%d", rand.Intn(numKeys))
 				start := time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				var opErr bool
 				if rand.Float64() < readRatio {
-					_, _ = client.Get(ctx, &proto.GetRequest{Key: key})
+					resp, err := client.Get(ctx, &proto.GetRequest{Key: key})
+					opErr = err != nil || (resp != nil && !resp.Found && resp.ErrorMessage != "")
 				} else {
-					value := make([]byte, valueSize)
-					_, _ = client.Put(ctx, &proto.PutRequest{Key: key, Value: value})
+					rand.Read(value)
+					resp, err := client.Put(ctx, &proto.PutRequest{Key: key, Value: value})
+					opErr = err != nil || (resp != nil && !resp.Success)
 				}
 				cancel()
 				lat := time.Since(start)
+
 				atomic.AddInt64(&totalOps, 1)
+				if opErr {
+					atomic.AddInt64(&totalErrs, 1)
+				}
 				mu.Lock()
 				latencies = append(latencies, lat)
 				mu.Unlock()
@@ -150,14 +175,30 @@ func runBenchmark(client proto.DistKVClient, concurrency int, readRatio float64)
 	wg.Wait()
 
 	ops := atomic.LoadInt64(&totalOps)
-	qps := float64(ops) / benchDuration.Seconds()
+	errs := atomic.LoadInt64(&totalErrs)
+	qps = float64(ops) / benchDuration.Seconds()
+	if ops > 0 {
+		errRate = float64(errs) / float64(ops) * 100
+	}
 
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	p99idx := int(float64(len(latencies)) * 0.99)
-	if p99idx >= len(latencies) {
-		p99idx = len(latencies) - 1
-	}
-	p99ms := float64(latencies[p99idx]) / float64(time.Millisecond)
+	n := len(latencies)
+	p50 = percentileMs(latencies, n, 0.50)
+	p95 = percentileMs(latencies, n, 0.95)
+	p99 = percentileMs(latencies, n, 0.99)
+	return
+}
 
-	return qps, p99ms
+func percentileMs(sorted []time.Duration, n int, pct float64) float64 {
+	if n == 0 {
+		return 0
+	}
+	idx := int(float64(n)*pct) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	return float64(sorted[idx]) / float64(time.Millisecond)
 }
